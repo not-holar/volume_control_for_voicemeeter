@@ -91,10 +91,8 @@ fn system_voicemeeter_device() -> Result<Option<IMMDevice>, String> {
 #[tokio::main]
 async fn main() {
     // Initialize Win32's COM interface. Things break without this step.
-    unsafe {
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-            .unwrap_or_else(|err| println!("CoInitializeEx failed: {}", err));
-    }
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+        .unwrap_or_else(|err| println!("CoInitializeEx failed: {}", err));
 
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
@@ -115,9 +113,10 @@ async fn main() {
 
     let (tx, mut rx) = tokio::sync::broadcast::channel(1);
 
-    let callback = IAudioEndpointVolumeCallback::from(VolumeObserver { tx });
+    // Don't drop this!
+    let callback_handle = IAudioEndpointVolumeCallback::from(VolumeObserver { tx });
 
-    unsafe { activation_handle.RegisterControlChangeNotify(&callback) }
+    unsafe { activation_handle.RegisterControlChangeNotify(&callback_handle) }
         .unwrap_or_else(|err| println!("Couldn't register volume callback: {:?}", err));
 
     loop {
