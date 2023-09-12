@@ -100,7 +100,7 @@ async fn main() {
     let remote = voicemeeter::VoicemeeterRemote::new()
         .expect("Couldn't connect to Voicemeeter, make sure it is running.");
 
-    let voicemeeter_gain = voicemeeter_nth_virtual_input_gain_parameter(&remote, 0)
+    let voicemeeter_gain_parameter = voicemeeter_nth_virtual_input_gain_parameter(&remote, 0)
     	.expect("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷.");
 
     let device = system_voicemeeter_device()
@@ -127,7 +127,7 @@ async fn main() {
             .and_then(|gain| {
                 Some(
                     remote
-                        .set_parameter_float(&voicemeeter_gain, gain)
+                        .set_parameter_float(&voicemeeter_gain_parameter, gain)
                         .unwrap_or_else(|err| println!("Couldn't set slider value: {err:?}")),
                 )
             });
