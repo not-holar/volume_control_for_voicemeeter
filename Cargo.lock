@@ -403,6 +403,7 @@ name = "volume_control_for_voicemeeter"
 version = "0.1.0"
 dependencies = [
  "lerp",
+ "thiserror",
  "tokio",
  "voicemeeter",
  "windows",
