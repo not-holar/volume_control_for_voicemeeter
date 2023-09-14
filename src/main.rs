@@ -1,4 +1,5 @@
 // mod eco_mode;
+mod voicemeeter;
 
 use lerp::Lerp;
 
@@ -27,22 +28,6 @@ impl IAudioEndpointVolumeCallback_Impl for VolumeObserver {
         let _ = self.tx.send(unsafe { &*data }.fMasterVolume);
         Ok(())
     }
-}
-
-fn voicemeeter_nth_virtual_input_gain_parameter(
-    remote: &voicemeeter::VoicemeeterRemote,
-    n: usize,
-) -> Option<voicemeeter::types::ParameterName> {
-    let parameters = remote.parameters();
-
-    Some(
-        (0..)
-            .map_while(|index| parameters.strip(index).ok()) // take all existing strips
-            .filter(|strip| strip.is_virtual()) // leave only virtual ones
-            .nth(n)? // take the n-th one
-            .param("Gain")
-            .into(),
-    )
 }
 
 fn endpoint_name(endpoint: &IMMDevice) -> Option<String> {
@@ -97,11 +82,22 @@ async fn main() {
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
-    let remote = voicemeeter::VoicemeeterRemote::new()
-        .expect("Couldn't connect to Voicemeeter, make sure it is running.");
+    let voicemeeter_link = voicemeeter::Link::new()
+        .map_err(|err| match &err {
+            voicemeeter::LinkCreationError::RemoteInit(inner) => match inner {
+                ::voicemeeter::interface::InitializationError::LoginError(_) => {
+                    format!("{:?}\nIs Voicemeeter running?", err)
+                }
+                _ => format!("{:?}", err),
+            },
+        })
+        .map_err(|err| format!("Failed to connect to Voicemeeter\n\t{}", err))
+        .unwrap_or_else(|err| {
+            panic!("{}", err);
+        });
 
-    let voicemeeter_gain_parameter = voicemeeter_nth_virtual_input_gain_parameter(&remote, 0)
-    	.expect("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷.");
+    let voicemeeter_gain_parameter = voicemeeter_link.gain_parameter(&voicemeeter_link.virtual_inputs().nth(0)
+    	.expect("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷."));
 
     let device = system_voicemeeter_device()
         .unwrap()
@@ -124,12 +120,10 @@ async fn main() {
             .await
             .ok()
             .map(|t| (-60.0).lerp(0.0, t))
-            .and_then(|gain| {
-                Some(
-                    remote
-                        .set_parameter_float(&voicemeeter_gain_parameter, gain)
-                        .unwrap_or_else(|err| println!("Couldn't set slider value: {err:?}")),
-                )
+            .map(|gain| {
+                voicemeeter_gain_parameter
+                    .set(gain)
+                    .unwrap_or_else(|err| println!("Couldn't set slider value: {err:?}"))
             });
     }
 }
