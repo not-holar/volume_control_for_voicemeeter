@@ -73,14 +73,16 @@ fn system_voicemeeter_device() -> Result<Option<IMMDevice>, String> {
     }))
 }
 
+fn handle_the_error(err: String) {
+    println!("{err}");
+
+    println!("\nPress ENTER to continue...");
+    std::io::stdin().lines().next();
+}
+
 #[tokio::main]
 async fn main() {
-    listen().await.unwrap_or_else(|err| {
-        println!("{err}");
-
-        println!("\nPress ENTER to continue...");
-        std::io::stdin().lines().next();
-    });
+    listen().await.unwrap_or_else(handle_the_error);
 }
 
 async fn listen() -> Result<(), String> {
