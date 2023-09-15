@@ -91,19 +91,31 @@ async fn listen() -> Result<(), String> {
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
-    let voicemeeter_link = voicemeeter::Link::new()
+    let voicemeeter_gain_parameter = voicemeeter::Link::new()
         .map_err(|err| match &err {
-            voicemeeter::LinkCreationError::RemoteInit(inner) => match inner {
-                ::voicemeeter::interface::InitializationError::LoginError(_) => {
-                    format!("{err:?}\nIs Voicemeeter running?")
+            voicemeeter::LinkCreationError::RemoteInit(inner) => format!(
+                "Failed to connect to Voicemeeter: {}",
+                match inner {
+                    ::voicemeeter::interface::InitializationError::LoginError(_) => {
+                        format!("{err:?}\nIs Voicemeeter running?")
+                    }
+                    _ => format!("{err:?}"),
                 }
-                _ => format!("{err:?}"),
-            },
+            ),
         })
-        .map_err(|err| format!("Failed to connect to Voicemeeter: {err}"))?;
-
-    let voicemeeter_gain_parameter = voicemeeter_link.gain_parameter(&voicemeeter_link.virtual_inputs().nth(0)
-    	.ok_or("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷.")?);
+        .and_then(|link| {
+            link.virtual_inputs()
+                .nth(0)
+                .ok_or(
+                    concat!(
+                        "There should absolutely be at least one",
+                        " Virtual Input in any Voicemeeter edition",
+                        " but it's not there 🤷."
+                    )
+                    .into(),
+                )
+                .map(|x| link.gain_parameter(&x))
+        })?;
 
     let device = system_voicemeeter_device()
         .map_err(|err| format!("Failed to access Windows devices: {err}"))?

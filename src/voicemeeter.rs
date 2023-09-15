@@ -1,15 +1,22 @@
+use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct LinkInner {
+    pub remote: ::voicemeeter::VoicemeeterRemote,
+}
+
 #[derive(Debug, Clone)]
 pub struct Link {
-    pub remote: ::voicemeeter::VoicemeeterRemote,
+    pub inner: Arc<LinkInner>,
 }
 
 /// The link between the app and Voicemeeter
 impl Link {
     pub fn new() -> Result<Self, LinkCreationError> {
-        Ok(Self {
-            remote: ::voicemeeter::VoicemeeterRemote::new()
-                .map_err(LinkCreationError::RemoteInit)?,
-        })
+        ::voicemeeter::VoicemeeterRemote::new()
+            .map_err(LinkCreationError::RemoteInit)
+            .map(|remote| LinkInner { remote }.into())
+            .map(|inner| Self { inner })
     }
 }
 
@@ -22,7 +29,7 @@ pub enum LinkCreationError {
 
 impl Link {
     pub fn strips(&self) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
-        let parameters = self.remote.parameters();
+        let parameters = self.inner.remote.parameters();
 
         (0..).map_while(move |index| parameters.strip(index).ok())
     }
@@ -40,22 +47,25 @@ impl Link {
     ) -> FloatParameter {
         FloatParameter {
             name: strip.param("Gain").into(),
-            link: &self,
+            link: self.clone(),
         }
     }
 }
 
-#[derive(Debug)]
-pub struct FloatParameter<'a> {
+#[derive(Debug, Clone)]
+pub struct FloatParameter {
     pub name: ::voicemeeter::types::ParameterName,
-    pub link: &'a Link,
+    pub link: Link,
 }
 
-impl<'a> FloatParameter<'a> {
+impl FloatParameter {
     pub fn set(
         &self,
         value: f32,
     ) -> Result<(), ::voicemeeter::interface::parameters::set_parameters::SetParameterError> {
-        self.link.remote.set_parameter_float(&self.name, value)
+        self.link
+            .inner
+            .remote
+            .set_parameter_float(&self.name, value)
     }
 }
