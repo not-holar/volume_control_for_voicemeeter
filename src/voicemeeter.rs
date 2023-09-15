@@ -20,7 +20,7 @@ impl Link {
     }
 }
 
-/// Error that can arise when creating ['VoicemeeterLink'].
+/// Error that can arise when creating [`VoicemeeterLink`].
 #[derive(Debug, thiserror::Error)]
 pub enum LinkCreationError {
     #[error("could not create VoicemeeterRemote")]
