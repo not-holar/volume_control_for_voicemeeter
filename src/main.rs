@@ -75,9 +75,18 @@ fn system_voicemeeter_device() -> Result<Option<IMMDevice>, String> {
 
 #[tokio::main]
 async fn main() {
+    listen().await.unwrap_or_else(|err| {
+        println!("{err}");
+
+        println!("\nPress ENTER to continue...");
+        std::io::stdin().lines().next();
+    });
+}
+
+async fn listen() -> Result<(), String> {
     // Initialize Win32's COM interface. Things break without this step.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-        .unwrap_or_else(|err| println!("CoInitializeEx failed: {}", err));
+        .map_err(|err| format!("CoInitializeEx failed: {err}"))?;
 
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
@@ -86,26 +95,23 @@ async fn main() {
         .map_err(|err| match &err {
             voicemeeter::LinkCreationError::RemoteInit(inner) => match inner {
                 ::voicemeeter::interface::InitializationError::LoginError(_) => {
-                    format!("{:?}\nIs Voicemeeter running?", err)
+                    format!("{err:?}\nIs Voicemeeter running?")
                 }
-                _ => format!("{:?}", err),
+                _ => format!("{err:?}"),
             },
         })
-        .map_err(|err| format!("Failed to connect to Voicemeeter\n\t{}", err))
-        .unwrap_or_else(|err| {
-            panic!("{}", err);
-        });
+        .map_err(|err| format!("Failed to connect to Voicemeeter: {err}"))?;
 
     let voicemeeter_gain_parameter = voicemeeter_link.gain_parameter(&voicemeeter_link.virtual_inputs().nth(0)
-    	.expect("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷."));
+    	.ok_or("There should absolutely be at least one Virtual Input in any Voicemeeter edition but it's not there 🤷.")?);
 
     let device = system_voicemeeter_device()
-        .unwrap()
-        .expect("Couldn't find Voicemeeter's virtual input (VAIO) device.");
+        .map_err(|err| format!("Failed to access Windows devices: {err}"))?
+        .ok_or("Couldn't find Voicemeeter's virtual input (VAIO) device.")?;
 
     let activation_handle =
         unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
-            .expect("Failed to activate device.");
+            .map_err(|err| format!("Failed to activate device: {err}"))?;
 
     let (tx, mut rx) = tokio::sync::broadcast::channel(1);
 
@@ -113,17 +119,18 @@ async fn main() {
     let callback_handle = IAudioEndpointVolumeCallback::from(VolumeObserver { tx });
 
     unsafe { activation_handle.RegisterControlChangeNotify(&callback_handle) }
-        .unwrap_or_else(|err| println!("Couldn't register volume callback: {:?}", err));
+        .map_err(|err| format!("Couldn't register volume callback: {err:?}"))?;
 
     loop {
-        rx.recv()
+        let t = rx
+            .recv()
             .await
-            .ok()
-            .map(|t| (-60.0).lerp(0.0, t))
-            .map(|gain| {
-                voicemeeter_gain_parameter
-                    .set(gain)
-                    .unwrap_or_else(|err| println!("Couldn't set slider value: {err:?}"))
-            });
+            .map_err(|err| format!("Stream error: {err:?}"))?;
+
+        let gain = (-60.0).lerp(0.0, t);
+
+        voicemeeter_gain_parameter
+            .set(gain)
+            .unwrap_or_else(|err| println!("Couldn't set slider value: {err:?}"))
     }
 }
