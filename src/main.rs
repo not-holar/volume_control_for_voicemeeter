@@ -45,7 +45,7 @@ async fn listen() -> Result<(), String> {
                     )
                     .into(),
                 )
-                .map(|x| link.gain_parameter(&x))
+                .map(|strip| link.gain_parameter(&strip))
         })?;
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
