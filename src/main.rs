@@ -1,77 +1,8 @@
 // mod eco_mode;
 mod voicemeeter;
+mod windows_volume;
 
 use lerp::Lerp;
-
-use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolumeCallback;
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolumeCallback_Impl;
-
-use windows::Win32::Media::Audio::{
-    eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA,
-    DEVICE_STATE_ACTIVE,
-};
-
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
-};
-
-#[windows::core::implement(IAudioEndpointVolumeCallback)]
-pub struct VolumeObserver {
-    tx: tokio::sync::broadcast::Sender<f32>,
-}
-
-#[allow(non_snake_case)]
-impl IAudioEndpointVolumeCallback_Impl for VolumeObserver {
-    fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
-        let _ = self.tx.send(unsafe { &*data }.fMasterVolume);
-        Ok(())
-    }
-}
-
-fn endpoint_name(endpoint: &IMMDevice) -> Option<String> {
-    Some(unsafe {
-        endpoint
-            .OpenPropertyStore(STGM_READ)
-            .ok()?
-            .GetValue(&PKEY_Device_FriendlyName)
-            .ok()?
-            .Anonymous
-            .Anonymous
-            .Anonymous
-            .pwszVal
-            .to_string()
-            .ok()?
-    })
-}
-
-fn all_endpoints() -> Result<impl Iterator<Item = (Option<String>, IMMDevice)>, String> {
-    let endpoints = unsafe {
-        CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_INPROC_SERVER)
-            .map_err(|err| format!("Failed to create DeviceEnumerator: {}", err))?
-            .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-            .map_err(|err| format!("Failed to Enumerate Audio Endpoints: {}", err))?
-    };
-
-    Ok(unsafe {
-        (0..(endpoints
-            .GetCount()
-            .map_err(|_| "Couldn't count endpoints.")?))
-            .filter_map(move |i| endpoints.Item(i).ok())
-            .map(|endpoint| (endpoint_name(&endpoint), endpoint))
-            .into_iter()
-    })
-}
-
-fn system_voicemeeter_device() -> Result<Option<IMMDevice>, String> {
-    Ok(all_endpoints()?.find_map(|(name, endpoint)| {
-        name?
-            .to_lowercase()
-            .contains("voicemeeter vaio")
-            .then_some(endpoint)
-    }))
-}
 
 fn handle_the_error(err: String) {
     println!("{err}");
@@ -86,9 +17,8 @@ async fn main() {
 }
 
 async fn listen() -> Result<(), String> {
-    // Initialize Win32's COM interface. Things break without this step.
-    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-        .map_err(|err| format!("CoInitializeEx failed: {err}"))?;
+    // Initialize Win32's COM libray. Things break without this step.
+    windows_volume::initialize_com().map_err(|err| format!("COM initialization failed: {err}"))?;
 
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
@@ -98,9 +28,8 @@ async fn listen() -> Result<(), String> {
             voicemeeter::LinkCreationError::RemoteInit(inner) => format!(
                 "Failed to connect to Voicemeeter: {}",
                 match inner {
-                    ::voicemeeter::interface::InitializationError::LoginError(_) => {
-                        format!("{err:?}\nIs Voicemeeter running?")
-                    }
+                    ::voicemeeter::interface::InitializationError::LoginError(_) =>
+                        format!("{err:?}\nIs Voicemeeter running?"),
                     _ => format!("{err:?}"),
                 }
             ),
@@ -119,29 +48,17 @@ async fn listen() -> Result<(), String> {
                 .map(|x| link.gain_parameter(&x))
         })?;
 
-    let device = system_voicemeeter_device()
-        .map_err(|err| format!("Failed to access Windows devices: {err}"))?
-        .ok_or("Couldn't find Voicemeeter's virtual input (VAIO) device.")?;
-
-    let activation_handle =
-        unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
-            .map_err(|err| format!("Failed to activate device: {err}"))?;
-
-    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
-
-    // Don't drop this!
-    let callback_handle = IAudioEndpointVolumeCallback::from(VolumeObserver { tx });
-
-    unsafe { activation_handle.RegisterControlChangeNotify(&callback_handle) }
-        .map_err(|err| format!("Couldn't register volume callback: {err:?}"))?;
+    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
+    let mut rx = observer.subscribe();
 
     loop {
-        let t = rx
+        // linear position of the volume slider from 0.0 to 1.0
+        let volume_slider_position = rx
             .recv()
             .await
-            .map_err(|err| format!("Stream error: {err:?}"))?;
+            .map_err(|err| format!("Stream error: {err:#?}"))?;
 
-        let gain = (-60.0).lerp(0.0, t);
+        let gain = (-60.0).lerp(0.0, volume_slider_position);
 
         voicemeeter_gain_parameter
             .set(gain)
