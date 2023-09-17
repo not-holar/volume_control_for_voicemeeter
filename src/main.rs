@@ -23,30 +23,26 @@ async fn listen() -> Result<(), String> {
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
-    let voicemeeter_gain_parameter = voicemeeter::Link::new()
-        .map_err(|err| match &err {
-            voicemeeter::LinkCreationError::RemoteInit(inner) => format!(
-                "Failed to connect to Voicemeeter: {}",
-                match inner {
-                    ::voicemeeter::interface::InitializationError::LoginError(_) =>
-                        format!("{err:?}\nIs Voicemeeter running?"),
-                    _ => format!("{err:?}"),
+    let voicemeeter_gain_parameter = {
+        let link = loop {
+            match voicemeeter::Link::new() {
+                Err(err) => {
+                    println!("Failed to connect to Voicemeeter: {err}\nRetrying in 15s");
+                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
                 }
-            ),
-        })
-        .and_then(|link| {
-            link.virtual_inputs()
-                .nth(0)
-                .ok_or(
-                    concat!(
-                        "There should absolutely be at least one",
-                        " Virtual Input in any Voicemeeter edition",
-                        " but it's not there 🤷."
-                    )
-                    .into(),
-                )
-                .map(|strip| link.gain_parameter(&strip))
-        })?;
+                Ok(link) => break link,
+            }
+        };
+        let strip = link.virtual_inputs().nth(0).ok_or(
+            concat!(
+                "There should absolutely be at least one",
+                " Virtual Input in any Voicemeeter edition",
+                " but it's not there 🤷."
+            )
+            .to_string(),
+        )?;
+        link.gain_parameter(&strip)
+    };
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
     let mut rx = observer.subscribe();
