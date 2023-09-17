@@ -23,16 +23,15 @@ async fn listen() -> Result<(), String> {
     // eco_mode::set_eco_mode_for_current_process()
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
+    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
+    let mut rx = observer.subscribe();
+
+    let link = voicemeeter::Link::new()
+        .map_err(|err| format!("Failed to register with Voicemeeter: {err:#?}"))?;
+
     let voicemeeter_gain_parameter = {
-        let link = loop {
-            match voicemeeter::Link::new() {
-                Err(err) => {
-                    println!("Failed to connect to Voicemeeter: {err}\nRetrying in 15s");
-                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                }
-                Ok(link) => break link,
-            }
-        };
+        link.wait_for_connection().await;
+
         let strip = link.virtual_inputs().nth(0).ok_or(
             concat!(
                 "There should absolutely be at least one",
@@ -41,11 +40,9 @@ async fn listen() -> Result<(), String> {
             )
             .to_string(),
         )?;
-        link.gain_parameter(&strip)
-    };
 
-    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
-    let mut rx = observer.subscribe();
+        link.gain_parameter_of(&strip)
+    };
 
     loop {
         // linear position of the volume slider from 0.0 to 1.0
