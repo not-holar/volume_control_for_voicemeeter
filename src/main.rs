@@ -1,5 +1,5 @@
-// mod eco_mode;
 mod voicemeeter;
+mod windows_eco_mode;
 mod windows_volume;
 
 use lerp::Lerp;
@@ -21,8 +21,8 @@ async fn listen() -> Result<(), String> {
     // Initialize Win32's COM libray. Things break without this step.
     windows_volume::initialize_com().map_err(|err| format!("COM initialization failed: {err}"))?;
 
-    // eco_mode::set_eco_mode_for_current_process()
-    //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
+    windows_eco_mode::set_eco_mode_for_current_process()
+        .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
     let mut windows_volume_stream = observer.subscribe();
