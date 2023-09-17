@@ -17,7 +17,7 @@ use windows::Win32::{
 
 #[derive(Debug, Clone)]
 pub struct VolumeObserver {
-    pub inner: Arc<VolumeObserverInner>,
+    inner: Arc<VolumeObserverInner>,
 }
 
 impl VolumeObserver {
@@ -29,17 +29,15 @@ impl VolumeObserver {
                 "Couldn't find a windows device with \"{name}\" in it's name."
             ))?;
 
-        let (tx, _) = tokio::sync::broadcast::channel(2);
-
-        let inner = VolumeObserverInner::new(tx, &device)?;
+        let inner = VolumeObserverInner::new(&device)?;
 
         Ok(Self {
             inner: inner.into(),
         })
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<f32> {
-        self.inner.tx.subscribe()
+    pub fn subscribe(&self) -> tokio_stream::wrappers::WatchStream<f32> {
+        self.inner.rx.clone().into()
     }
 
     fn find_system_device_by_name(name: &str) -> Result<Option<IMMDevice>, String> {
@@ -90,39 +88,42 @@ impl VolumeObserver {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct VolumeObserverInner {
-    pub tx: tokio::sync::broadcast::Sender<f32>,
+#[derive(Debug)]
+struct VolumeObserverInner {
+    pub rx: tokio::sync::watch::Receiver<f32>,
     _keepalive: (IAudioEndpointVolumeCallback, IAudioEndpointVolume),
 }
 
 impl VolumeObserverInner {
-    pub fn new(
-        tx: tokio::sync::broadcast::Sender<f32>,
-        device: &IMMDevice,
-    ) -> Result<Self, String> {
+    pub fn new(device: &IMMDevice) -> Result<Self, String> {
         // Don't drop this!
         let endpoint_volume =
             unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
                 .map_err(|err| format!("Failed to activate device: {err}"))?;
 
+        let initial_volume = unsafe { endpoint_volume.GetMasterVolumeLevelScalar() }
+            .map_err(|err| println!("Couldn't read volume on start: {err}"))
+            .unwrap_or(0.0);
+
+        let (tx, rx) = tokio::sync::watch::channel(initial_volume);
+
         // Don't drop this either!
-        let callback = IAudioEndpointVolumeCallback::from(Callback { tx: tx.clone() });
+        let callback = IAudioEndpointVolumeCallback::from(Callback { tx });
 
         unsafe { endpoint_volume.RegisterControlChangeNotify(&callback) }
             .map_err(|err| format!("Couldn't register volume callback: {err:?}"))?;
 
         Ok(Self {
-            tx,
+            rx,
             _keepalive: (callback, endpoint_volume),
         })
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[windows::core::implement(IAudioEndpointVolumeCallback)]
 struct Callback {
-    pub tx: tokio::sync::broadcast::Sender<f32>,
+    pub tx: tokio::sync::watch::Sender<f32>,
 }
 
 #[allow(non_snake_case)]

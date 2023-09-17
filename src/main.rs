@@ -3,6 +3,7 @@ mod voicemeeter;
 mod windows_volume;
 
 use lerp::Lerp;
+use tokio_stream::StreamExt;
 
 fn handle_the_error(err: String) {
     println!("{err}");
@@ -24,7 +25,7 @@ async fn listen() -> Result<(), String> {
     //     .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
-    let mut rx = observer.subscribe();
+    let mut windows_volume_stream = observer.subscribe();
 
     let link = voicemeeter::Link::new()
         .map_err(|err| format!("Failed to register with Voicemeeter: {err:#?}"))?;
@@ -46,10 +47,10 @@ async fn listen() -> Result<(), String> {
 
     loop {
         // linear position of the volume slider from 0.0 to 1.0
-        let volume_slider_position = rx
-            .recv()
+        let volume_slider_position = windows_volume_stream
+            .next()
             .await
-            .map_err(|err| format!("Stream error: {err:#?}"))?;
+            .ok_or("Stream ran dry 🤨")?;
 
         let gain = (-60.0).lerp(0.0, volume_slider_position);
 
