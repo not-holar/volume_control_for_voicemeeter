@@ -31,7 +31,7 @@ impl VolumeObserver {
 
         let (tx, _) = tokio::sync::broadcast::channel(2);
 
-        let inner = VolumeObserverInner::new(tx.clone(), &device)?;
+        let inner = VolumeObserverInner::new(tx, &device)?;
 
         Ok(Self {
             inner: inner.into(),
