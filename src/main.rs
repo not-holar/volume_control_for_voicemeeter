@@ -33,7 +33,7 @@ async fn listen() -> Result<(), String> {
     let voicemeeter_gain_parameter = {
         link.wait_for_connection().await;
 
-        let strip = link.virtual_inputs().nth(0).ok_or(
+        let strip = link.virtual_inputs().next().ok_or(
             concat!(
                 "There should absolutely be at least one",
                 " Virtual Input in any Voicemeeter edition",

@@ -67,7 +67,6 @@ impl VolumeObserver {
                 .map_err(|_| "Couldn't count endpoints.")?))
                 .filter_map(move |i| endpoints.Item(i).ok())
                 .map(|endpoint| (Self::endpoint_name(&endpoint), endpoint))
-                .into_iter()
         })
     }
 
