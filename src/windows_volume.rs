@@ -37,7 +37,7 @@ impl VolumeObserver {
         })
     }
 
-    pub fn subscribe(&self) -> smol::channel::Receiver<f32> {
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Option<f32>> {
         self.inner.rx.clone()
     }
 
@@ -88,7 +88,7 @@ impl VolumeObserver {
 
 #[derive(Debug)]
 struct VolumeObserverInner {
-    pub rx: smol::channel::Receiver<f32>,
+    pub rx: tokio::sync::watch::Receiver<Option<f32>>,
     _keepalive: (IAudioEndpointVolumeCallback, IAudioEndpointVolume),
 }
 
@@ -99,12 +99,9 @@ impl VolumeObserverInner {
             unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
                 .context("Failed to activate device")?;
 
-        let (tx, rx) = smol::channel::unbounded();
-
-        if let Ok(initial_volume) = unsafe { endpoint_volume.GetMasterVolumeLevelScalar() } {
-            tx.send_blocking(initial_volume)
-                .context("Stream error when sending initial volume")?;
-        }
+        let (tx, rx) = tokio::sync::watch::channel(
+            unsafe { endpoint_volume.GetMasterVolumeLevelScalar() }.ok(),
+        );
 
         // Don't drop this either!
         let callback = IAudioEndpointVolumeCallback::from(Callback { tx });
@@ -122,15 +119,23 @@ impl VolumeObserverInner {
 #[derive(Debug)]
 #[windows::core::implement(IAudioEndpointVolumeCallback)]
 struct Callback {
-    pub tx: smol::channel::Sender<f32>,
+    pub tx: tokio::sync::watch::Sender<Option<f32>>,
 }
 
 #[allow(non_snake_case)]
 impl IAudioEndpointVolumeCallback_Impl for Callback {
     fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
-        self.tx
-            .send_blocking(unsafe { &*data }.fMasterVolume)
-            .expect("IAudioEndpointVolumeCallback_Impl send error");
+        self.tx.send_if_modified(|x| {
+            let volume = unsafe { &*data }.fMasterVolume;
+
+            if Some(volume) != *x {
+                x.replace(volume);
+                true
+            } else {
+                false
+            }
+        });
+        // .expect("IAudioEndpointVolumeCallback_Impl send error");
         Ok(())
     }
 }

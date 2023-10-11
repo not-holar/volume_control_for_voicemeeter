@@ -31,7 +31,7 @@ async fn listen() -> anyhow::Result<()> {
         .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
-    let windows_volume_stream = observer.subscribe();
+    let mut windows_volume_stream = observer.subscribe();
 
     let link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
 
@@ -44,11 +44,15 @@ async fn listen() -> anyhow::Result<()> {
         let mut vm_gain_parameter = None;
 
         loop {
-            // linear position of the volume slider from 0.0 to 1.0
-            let volume_slider_position = windows_volume_stream
-                .recv()
+            windows_volume_stream
+                .changed()
                 .await
                 .context("windows_volume_stream error 🤨")?;
+
+            // linear position of the volume slider from 0.0 to 1.0
+            let Some(volume_slider_position) = ({ *windows_volume_stream.borrow() }) else {
+                continue;
+            };
 
             link.wait_for_connection().await;
 
