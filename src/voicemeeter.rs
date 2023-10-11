@@ -58,7 +58,7 @@ impl Link {
     pub async fn wait_for_connection(&self) {
         while !self.is_currently_connected() {
             println!("Couldn't connect to Voicemeeter\tRetrying in 15s");
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            smol::Timer::after(std::time::Duration::from_secs(15)).await;
         }
     }
 }

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::sync::Arc;
 
 use windows::Win32::{
@@ -22,12 +23,12 @@ pub struct VolumeObserver {
 
 impl VolumeObserver {
     /// Observe volume changes of the device whose name contains [`name`]
-    pub fn from_device_name(name: &str) -> Result<Self, String> {
+    pub fn from_device_name(name: &str) -> anyhow::Result<Self> {
         let device = Self::find_system_device_by_name(name)
-            .map_err(|err| format!("Failed to access Windows devices: {err}"))?
-            .ok_or(format!(
-                "Couldn't find a windows device with \"{name}\" in it's name."
-            ))?;
+            .context("Failed to access Windows devices")?
+            .with_context(|| {
+                format!("Couldn't find a windows device with \"{name}\" in it's name.")
+            })?;
 
         let inner = VolumeObserverInner::new(&device)?;
 
@@ -36,11 +37,11 @@ impl VolumeObserver {
         })
     }
 
-    pub fn subscribe(&self) -> tokio_stream::wrappers::WatchStream<f32> {
-        self.inner.rx.clone().into()
+    pub fn subscribe(&self) -> smol::channel::Receiver<f32> {
+        self.inner.rx.clone()
     }
 
-    fn find_system_device_by_name(name: &str) -> Result<Option<IMMDevice>, String> {
+    fn find_system_device_by_name(name: &str) -> anyhow::Result<Option<IMMDevice>> {
         Ok(Self::all_endpoints()?.find_map(|(device_name, endpoint)| {
             device_name?
                 .to_lowercase()
@@ -49,22 +50,20 @@ impl VolumeObserver {
         }))
     }
 
-    fn all_endpoints() -> Result<impl Iterator<Item = (Option<String>, IMMDevice)>, String> {
+    fn all_endpoints() -> anyhow::Result<impl Iterator<Item = (Option<String>, IMMDevice)>> {
         let endpoints = unsafe {
             CoCreateInstance::<_, IMMDeviceEnumerator>(
                 &MMDeviceEnumerator,
                 None,
                 CLSCTX_INPROC_SERVER,
             ) // Create device enumerator
-            .map_err(|err| format!("Failed to create DeviceEnumerator: {}", err))?
+            .context("Failed to create DeviceEnumerator")?
             .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
-            .map_err(|err| format!("Failed to Enumerate Audio Endpoints: {}", err))?
+            .context("Failed to Enumerate Audio Endpoints")?
         };
 
         Ok(unsafe {
-            (0..(endpoints
-                .GetCount()
-                .map_err(|_| "Couldn't count endpoints.")?))
+            (0..(endpoints.GetCount().context("Couldn't count endpoints.")?))
                 .filter_map(move |i| endpoints.Item(i).ok())
                 .map(|endpoint| (Self::endpoint_name(&endpoint), endpoint))
         })
@@ -89,28 +88,29 @@ impl VolumeObserver {
 
 #[derive(Debug)]
 struct VolumeObserverInner {
-    pub rx: tokio::sync::watch::Receiver<f32>,
+    pub rx: smol::channel::Receiver<f32>,
     _keepalive: (IAudioEndpointVolumeCallback, IAudioEndpointVolume),
 }
 
 impl VolumeObserverInner {
-    pub fn new(device: &IMMDevice) -> Result<Self, String> {
+    pub fn new(device: &IMMDevice) -> anyhow::Result<Self> {
         // Don't drop this!
         let endpoint_volume =
             unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
-                .map_err(|err| format!("Failed to activate device: {err}"))?;
+                .context("Failed to activate device")?;
 
-        let initial_volume = unsafe { endpoint_volume.GetMasterVolumeLevelScalar() }
-            .map_err(|err| println!("Couldn't read volume on start: {err}"))
-            .unwrap_or(0.0);
+        let (tx, rx) = smol::channel::unbounded();
 
-        let (tx, rx) = tokio::sync::watch::channel(initial_volume);
+        if let Ok(initial_volume) = unsafe { endpoint_volume.GetMasterVolumeLevelScalar() } {
+            tx.send_blocking(initial_volume)
+                .context("Stream error when sending initial volume")?;
+        }
 
         // Don't drop this either!
         let callback = IAudioEndpointVolumeCallback::from(Callback { tx });
 
         unsafe { endpoint_volume.RegisterControlChangeNotify(&callback) }
-            .map_err(|err| format!("Couldn't register volume callback: {err:?}"))?;
+            .context("Couldn't register volume callback")?;
 
         Ok(Self {
             rx,
@@ -122,13 +122,15 @@ impl VolumeObserverInner {
 #[derive(Debug)]
 #[windows::core::implement(IAudioEndpointVolumeCallback)]
 struct Callback {
-    pub tx: tokio::sync::watch::Sender<f32>,
+    pub tx: smol::channel::Sender<f32>,
 }
 
 #[allow(non_snake_case)]
 impl IAudioEndpointVolumeCallback_Impl for Callback {
     fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
-        let _ = self.tx.send(unsafe { &*data }.fMasterVolume);
+        self.tx
+            .send_blocking(unsafe { &*data }.fMasterVolume)
+            .expect("IAudioEndpointVolumeCallback_Impl send error");
         Ok(())
     }
 }
