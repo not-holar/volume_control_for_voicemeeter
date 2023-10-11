@@ -35,23 +35,14 @@ async fn listen() -> anyhow::Result<()> {
 
     let link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
 
-    let voicemeeter_gain_parameter = {
-        link.wait_for_connection().await;
-
-        let strip = link.virtual_inputs().next().context(
-            "There should absolutely be at least one \
-            Virtual Input in any Voicemeeter edition \
-            but it's not there 🤷.",
-        )?;
-
-        link.gain_parameter_of(&strip)
-    };
-
     (async {
         tokio_graceful::default_signal().await;
         anyhow::Ok(())
     })
     .or(async {
+        let mut previous_vm_edition = ::voicemeeter::types::VoicemeeterApplication::None;
+        let mut vm_gain_parameter = None;
+
         loop {
             // linear position of the volume slider from 0.0 to 1.0
             let volume_slider_position = windows_volume_stream
@@ -59,10 +50,36 @@ async fn listen() -> anyhow::Result<()> {
                 .await
                 .context("windows_volume_stream error 🤨")?;
 
+            link.wait_for_connection().await;
+
+            {
+                let mut remote = link.inner.remote.lock().await;
+
+                let vm_edition = {
+                    remote.update_program()?;
+                    remote.program
+                };
+
+                if vm_edition != previous_vm_edition {
+                    previous_vm_edition = vm_edition;
+                    vm_gain_parameter = Some({
+                        let strip = voicemeeter::Link::virtual_inputs(&remote).next().context(
+                            "There should absolutely be at least one \
+                            Virtual Input in any Voicemeeter edition \
+                            but it's not there 🤷.",
+                        )?;
+
+                        link.gain_parameter_of(&strip)
+                    });
+                }
+            };
+            let vm_gain_parameter = vm_gain_parameter.as_ref().unwrap();
+
             let gain = (-60.0).lerp(0.0, volume_slider_position);
 
-            voicemeeter_gain_parameter
+            vm_gain_parameter
                 .set(gain)
+                .await
                 .context("Couldn't set slider value")
                 .unwrap_or_else(print_error)
         }

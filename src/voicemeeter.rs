@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LinkInner {
-    pub remote: ::voicemeeter::VoicemeeterRemote,
+    pub remote: smol::lock::Mutex<::voicemeeter::VoicemeeterRemote>,
 }
 
 #[derive(Debug, Clone)]
@@ -15,7 +15,12 @@ impl Link {
     pub fn new() -> Result<Self, LinkCreationError> {
         ::voicemeeter::VoicemeeterRemote::new()
             .map_err(LinkCreationError::RemoteInit)
-            .map(|remote| LinkInner { remote }.into())
+            .map(|remote| {
+                LinkInner {
+                    remote: remote.into(),
+                }
+                .into()
+            })
             .map(|inner| Self { inner })
     }
 }
@@ -28,16 +33,18 @@ pub enum LinkCreationError {
 }
 
 impl Link {
-    pub fn strips(&self) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
-        let parameters = self.inner.remote.parameters();
+    pub fn strips(
+        remote: &::voicemeeter::VoicemeeterRemote,
+    ) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
+        let parameters = remote.parameters();
 
         (0..).map_while(move |index| parameters.strip(index).ok())
     }
 
     pub fn virtual_inputs(
-        &self,
+        remote: &::voicemeeter::VoicemeeterRemote,
     ) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
-        self.strips() // take all existing strips
+        Self::strips(remote) // take all existing strips
             .filter(::voicemeeter::interface::parameters::Strip::is_virtual) // leave only virtual ones
     }
 
@@ -51,14 +58,25 @@ impl Link {
         }
     }
 
-    pub fn is_currently_connected(&self) -> bool {
-        self.inner.remote.is_parameters_dirty().is_ok()
+    pub async fn is_currently_connected(&self) -> bool {
+        self.inner.remote.lock().await.is_parameters_dirty().is_ok()
     }
 
     pub async fn wait_for_connection(&self) {
-        while !self.is_currently_connected() {
-            println!("Couldn't connect to Voicemeeter.\tRetrying in 15s");
-            smol::Timer::after(std::time::Duration::from_secs(15)).await;
+        if !self.is_currently_connected().await {
+            println!(
+                "Couldn't connect to Voicemeeter. Will retry every 5s.\
+                Make sure it is running."
+            );
+
+            loop {
+                smol::Timer::after(std::time::Duration::from_secs(5)).await;
+
+                if self.is_currently_connected().await {
+                    println!("Connected.");
+                    break;
+                }
+            }
         }
     }
 }
@@ -70,13 +88,15 @@ pub struct FloatParameter {
 }
 
 impl FloatParameter {
-    pub fn set(
+    pub async fn set(
         &self,
         value: f32,
     ) -> Result<(), ::voicemeeter::interface::parameters::set_parameters::SetParameterError> {
         self.link
             .inner
             .remote
+            .lock()
+            .await
             .set_parameter_float(&self.name, value)
     }
 }
