@@ -2,9 +2,12 @@ mod voicemeeter;
 mod windows_eco_mode;
 mod windows_volume;
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use lerp::Lerp;
 use smol::future::FutureExt;
+use tokio::sync::Notify;
 
 fn print_error(err: impl std::fmt::Display) {
     println!("{err}");
@@ -35,8 +38,67 @@ async fn listen() -> anyhow::Result<()> {
 
     let link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
 
+    let exit_signal = Arc::new(Notify::new());
+
+    {
+        let exit_signal = exit_signal.to_owned();
+
+        std::thread::Builder::new()
+            .name("Tray icon event loop".into())
+            .spawn(move || {
+                (|| -> anyhow::Result<()> {
+                    let tray_menu = tray_icon::menu::Menu::new();
+                    tray_menu
+                        .append(&tray_icon::menu::MenuItem::new("Exit", true, None))
+                        .context("Couldn't add item to the tray menu")?;
+
+                    let _tray_icon = tray_icon::TrayIconBuilder::new()
+                        .with_menu(Box::new(tray_menu))
+                        .with_tooltip(format!(
+                            "{}  v{}",
+                            env!("CARGO_PKG_NAME"),
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .with_icon(
+                            tray_icon::Icon::from_path("./media/icon.ico", None)
+                                .context("Failed to make icon")?,
+                        )
+                        .build()
+                        .unwrap();
+
+                    // let tray_channel = tray_icon::TrayIconEvent::receiver();
+                    let menu_channel = tray_icon::menu::MenuEvent::receiver();
+
+                    use winit::event_loop::EventLoopBuilder;
+                    use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
+                    use winit::platform::windows::EventLoopBuilderExtWindows;
+
+                    EventLoopBuilder::new()
+                        .with_any_thread(true)
+                        .build()?
+                        .run_on_demand(|_, elwt| {
+                            // if let Ok(event) = tray_channel.try_recv() {
+                            //     println!("{event:?}");
+                            // }
+                            if menu_channel.try_recv().is_ok() {
+                                elwt.exit();
+                            }
+                        })?;
+
+                    Ok(())
+                })()
+                .unwrap_or_else(print_error);
+
+                exit_signal.notify_one();
+            })?;
+    }
+
     (async {
         tokio_graceful::default_signal().await;
+        anyhow::Ok(())
+    })
+    .or(async {
+        exit_signal.notified().await;
         anyhow::Ok(())
     })
     .or(async {
