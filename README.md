@@ -32,3 +32,7 @@ To make the application start with Windows:
 Please report any bugs you encounter as well as suggest improvements by using [Github issues](https://github.com/not-holar/volume_control_for_voicemeeter/issues).
 
 Feel free to file Pull requests with your contributions
+
+## Troubleshooting
+
+To see the log of what is going on, exit the application and relaunch it inside of a terminal
