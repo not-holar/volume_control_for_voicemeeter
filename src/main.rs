@@ -60,7 +60,7 @@ async fn listen() -> anyhow::Result<()> {
                             env!("CARGO_PKG_VERSION")
                         ))
                         .with_icon(
-                            tray_icon::Icon::from_path("./media/icon.ico", None)
+                            tray_icon::Icon::from_resource(1, None)
                                 .context("Failed to make icon")?,
                         )
                         .build()
