@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 mod voicemeeter;
 mod windows_eco_mode;
 mod windows_volume;
