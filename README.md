@@ -6,9 +6,9 @@
 
 <h1 align="center">volume_control_for_voicemeeter</h1>
 
-A simple and tiny tray application that syncs the Windows volume of the `VoiceMeeter Input` device to the volume of the first virtual input strip (which corresponds to that `VoiceMeeter Input` device).
+A simple and tiny tray application that syncs the **in-Windows** volume of the `VoiceMeeter Input (VAIO)` audio output device to the volume of the first virtual input strip **in Voicemeeter** (which corresponds to that same device).
 
-This allows the built-in Windows volume slider 🎚️, any mixer apps' sliders 🎚️ as well as gestures and keyboard volume keys ⌨️ to control the volume of Voicemeeter.
+This allows the built-in Windows volume slider 🎚️, any mixer apps' (e.g. sndvol.exe, EarTrumpet, etc) sliders 🎚️ as well as gestures and keyboard volume keys ⌨️ to control the volume of Voicemeeter.
 
 Written in Rust  🦀
 
