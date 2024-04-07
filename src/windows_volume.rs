@@ -2,7 +2,7 @@ use anyhow::Context;
 use std::sync::Arc;
 
 use windows::Win32::{
-    Devices::FunctionDiscovery::PKEY_Device_FriendlyName,
+    Devices::FunctionDiscovery::PKEY_Device_DeviceDesc,
     Media::Audio::{
         eRender,
         Endpoints::{
@@ -43,10 +43,19 @@ impl VolumeObserver {
 
     fn find_system_device_by_name(name: &str) -> anyhow::Result<Option<IMMDevice>> {
         Ok(Self::all_endpoints()?.find_map(|(device_name, endpoint)| {
-            device_name?
-                .to_lowercase()
-                .contains(name)
-                .then_some(endpoint)
+            let device_name = device_name?;
+
+            let matches = device_name.to_lowercase().contains(name);
+
+            println!(
+                "{} {device_name}",
+                match matches {
+                    false => "❌\t",
+                    true => "✔\t",
+                }
+            );
+
+            matches.then_some(endpoint)
         }))
     }
 
@@ -74,14 +83,10 @@ impl VolumeObserver {
             endpoint
                 .OpenPropertyStore(STGM_READ)
                 .ok()?
-                .GetValue(&PKEY_Device_FriendlyName)
+                // .GetValue(&PKEY_Device_FriendlyName)
+                .GetValue(&PKEY_Device_DeviceDesc)
                 .ok()?
-                .Anonymous
-                .Anonymous
-                .Anonymous
-                .pwszVal
                 .to_string()
-                .ok()?
         })
     }
 }
@@ -142,5 +147,5 @@ impl IAudioEndpointVolumeCallback_Impl for Callback {
 
 /// Initialize Win32's COM library. Things break without this step.
 pub fn initialize_com() -> ::windows::core::Result<()> {
-    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+    unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok()
 }

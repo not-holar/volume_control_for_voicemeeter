@@ -23,6 +23,8 @@ fn handle_the_error(err: impl std::fmt::Display) {
 }
 
 fn main() {
+    println!("Started");
+
     smol::block_on(listen()).unwrap_or_else(handle_the_error);
 
     println!("Exiting safely");
@@ -32,10 +34,12 @@ async fn listen() -> anyhow::Result<()> {
     // Initialize Win32's COM libray. Things break without this step.
     windows_volume::initialize_com().context("COM initialization failed")?;
 
+    println!("COM initialized");
+
     windows_eco_mode::set_eco_mode_for_current_process()
         .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
 
-    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter vaio")?;
+    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter input")?;
     let mut windows_volume_stream = observer.subscribe();
 
     let link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
@@ -107,6 +111,8 @@ async fn listen() -> anyhow::Result<()> {
         let mut previous_vm_edition = ::voicemeeter::types::VoicemeeterApplication::None;
         let mut vm_gain_parameter = None;
 
+        println!("Listening for volume changes");
+
         loop {
             windows_volume_stream
                 .changed()
@@ -117,6 +123,8 @@ async fn listen() -> anyhow::Result<()> {
             let Some(volume_slider_position) = ({ *windows_volume_stream.borrow() }) else {
                 continue;
             };
+
+            println!("Changed to {volume_slider_position}");
 
             link.wait_for_connection().await;
 

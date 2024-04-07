@@ -1,27 +1,27 @@
 [package]
 name = "volume_control_for_voicemeeter"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 build = "build.rs"
 
 [target.'cfg(windows)'.build-dependencies]
-winres = "0.1"
+winres = "0.1.12"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = "1.0.81"
 lerp = "0.5.0"
-smol = "1.3.0"
-thiserror = "1.0.48"
-tokio = { version = "1.33.0", features = ["sync"] }
-tokio-graceful = "0.1.5"
-tray-icon = "0.9.0"
-voicemeeter = "0.2.0"
-winit = "0.29.1-beta"
+smol = "2.0.0"
+thiserror = "1.0.58"
+tokio = { version = "1.37.0", features = ["sync"] }
+tokio-graceful = "0.1.6"
+tray-icon = "0.13.1"
+voicemeeter = "0.3.0"
+winit = "0.29.15"
 
 [dependencies.windows]
-version = "0.51"
+version = "0.54.0"
 features = [
 	"implement",
 	# "Foundation_Collections",
@@ -39,7 +39,3 @@ features = [
 	"Win32_System_Threading",
 	"Win32_System_Variant",
 ]
-
-[patch.crates-io]
-voicemeeter = { git = "https://github.com/Emilgardis/voicemeeter-sdk-rs.git" }
-winit = { git = "https://github.com/rust-windowing/winit.git" }

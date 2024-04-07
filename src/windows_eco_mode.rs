@@ -22,7 +22,7 @@ pub fn set_eco_mode_for_current_process() -> Result<(), String> {
             std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
         )
     }
-    .map_err(|err| format!("{:?} {:?} {:?}", err.message(), err.code(), err.info()))
+    .map_err(|err| format!("{:?} {:?}", err.message(), err.code()))
 }
 
 // TODO: fix this
