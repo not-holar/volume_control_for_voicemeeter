@@ -24,7 +24,7 @@ Written in Rust  🦀
 
 ## Download
 
-Simply download the archive, which contains the **exe**, for your corresponding platform from the latest of [Releases](https://github.com/not-holar/volume_control_for_voicemeeter/releases)
+Simply download the **zip** archive (**exe** inside) for your corresponding platform from the [latest](https://github.com/not-holar/volume_control_for_voicemeeter/releases/latest) of [Releases](https://github.com/not-holar/volume_control_for_voicemeeter/releases)
 
 * **x86_64-pc-windows-msvc** builds are for x86 CPUs (Intel, AMD)
 * **aarch64-pc-windows-msvc** builds are for ARM CPUs (Qualcomm, etc) - please note that ARM builds are experimental, kindly [report any issues](https://github.com/not-holar/volume_control_for_voicemeeter/issues/new)
