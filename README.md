@@ -12,6 +12,8 @@ This allows the built-in Windows volume slider 🎚️, any mixer apps' (e.g. sn
 
 Written in Rust  🦀
 
+[![Deploy](https://github.com/not-holar/volume_control_for_voicemeeter/actions/workflows/rust.yml/badge.svg)](https://github.com/not-holar/volume_control_for_voicemeeter/actions/workflows/rust.yml)
+
 ### Features
 
 * Instead of constantly polling the volume slider for changes, this app uses the built-in Windows' `IAudioEndpointVolumeCallback` interface, thanks to which, the program is **completely idle** and not using **any** CPU resources when the volume isn't being changed.
