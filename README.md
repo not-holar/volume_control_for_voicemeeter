@@ -34,8 +34,8 @@ To make the application start with Windows:
 
 1. Open **File Explorer**
 2. Paste **`shell:startup`** into the Address bar and press **Enter**
-3. Put **volume_control_for_voicemeeter.exe** (or a shortcut to it) in the folder that opened
-4. Launch the **exe** if it wasn't already running
+3. Put **volume_control_for_voicemeeter.exe** (or a shortcut to it) in the folder that opens
+4. Launch the **exe** if it isn't running already
 
 ## Contributing
 
