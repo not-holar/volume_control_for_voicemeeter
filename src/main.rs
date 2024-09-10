@@ -3,6 +3,7 @@
 mod voicemeeter;
 mod windows_eco_mode;
 mod windows_volume;
+mod volume_curves;
 
 use std::sync::Arc;
 
