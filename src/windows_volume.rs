@@ -16,6 +16,8 @@ use windows::Win32::{
     },
 };
 
+use crate::volume_curves;
+
 #[derive(Debug, Clone)]
 pub struct VolumeObserver {
     inner: Arc<VolumeObserverInner>,
@@ -136,8 +138,9 @@ impl IAudioEndpointVolumeCallback_Impl for Callback {
             let valid = Some(muted).is_some() && Some(volume).is_some();
             if valid {
                 let actualVolume = if muted { 0.0 } else {volume};
-                    if x.expect("Value must be valid") != actualVolume{
-                    x.replace(actualVolume);
+                
+                if x.expect("Value must be valid") != actualVolume{
+                    x.replace(volume_curves::ease_out_expo(actualVolume));
                     true
                 }
                 else {
