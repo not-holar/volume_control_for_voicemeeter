@@ -10,15 +10,15 @@ winres = "0.1.12"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.98"
 lerp = "0.5.0"
-smol = "2.0.0"
-thiserror = "1.0.58"
-tokio = { version = "1.37.0", features = ["sync"] }
-tokio-graceful = "0.1.6"
-tray-icon = "0.13.1"
+smol = "2.0.2"
+thiserror = "2.0.12"
+tokio = { version = "1.44.2", features = ["sync"] }
+tokio-graceful = "0.2.2"
+tray-icon = "0.20.0"
 voicemeeter = "0.3.0"
-winit = "0.29.15"
+winit = "0.30.9"
 
 [dependencies.windows]
 version = "0.54.0"

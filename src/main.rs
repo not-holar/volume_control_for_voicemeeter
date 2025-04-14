@@ -75,11 +75,11 @@ async fn listen() -> anyhow::Result<()> {
                     // let tray_channel = tray_icon::TrayIconEvent::receiver();
                     let menu_channel = tray_icon::menu::MenuEvent::receiver();
 
-                    use winit::event_loop::EventLoopBuilder;
+                    use winit::event_loop::EventLoop;
                     use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
                     use winit::platform::windows::EventLoopBuilderExtWindows;
 
-                    EventLoopBuilder::new()
+                    EventLoop::builder()
                         .with_any_thread(true)
                         .build()?
                         .run_on_demand(|_, elwt| {
