@@ -127,7 +127,7 @@ struct Callback {
 }
 
 #[allow(non_snake_case)]
-impl IAudioEndpointVolumeCallback_Impl for Callback {
+impl IAudioEndpointVolumeCallback_Impl for Callback_Impl {
     fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
         self.tx.send_if_modified(|x| {
             let volume = unsafe { &*data }.fMasterVolume;
