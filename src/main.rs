@@ -69,39 +69,82 @@ async fn listen() -> anyhow::Result<()> {
             .name("Tray icon event loop".into())
             .spawn(move || {
                 let _ = (|| -> anyhow::Result<()> {
-                    let tray_menu = tray_icon::menu::Menu::new();
-                    tray_menu
-                        .append(&tray_icon::menu::MenuItem::new("Exit", true, None))
-                        .context("Couldn't add item to the tray menu")?;
+                    #[derive(Default)]
+                    struct Application {
+                        tray_icon: Option<tray_icon::TrayIcon>,
+                    }
 
-                    let _tray_icon = tray_icon::TrayIconBuilder::new()
-                        .with_menu(Box::new(tray_menu))
-                        .with_tooltip(package_name!())
-                        .with_icon(
-                            tray_icon::Icon::from_resource(1, None)
-                                .context("Failed to read icon resource")?,
-                        )
-                        .build()
-                        .context("Failed to build tray icon")?;
+                    impl Application {
+                        fn new_tray_menu(&mut self) -> anyhow::Result<()> {
+                            let tray_menu = tray_icon::menu::Menu::new();
+                            tray_menu
+                                .append(&tray_icon::menu::MenuItem::new("Exit", true, None))
+                                .context("Couldn't add item to the tray menu")?;
 
-                    // let tray_channel = tray_icon::TrayIconEvent::receiver();
-                    let menu_channel = tray_icon::menu::MenuEvent::receiver();
+                            let tray_icon = tray_icon::TrayIconBuilder::new()
+                                .with_menu(Box::new(tray_menu))
+                                .with_tooltip(package_name!())
+                                .with_icon(
+                                    tray_icon::Icon::from_resource(1, None)
+                                        .context("Failed to read icon resource")?,
+                                )
+                                .build()
+                                .context("Failed to build tray icon")?;
+
+                            self.tray_icon = Some(tray_icon);
+
+                            Ok(())
+                        }
+
+                    }
+
+                    impl winit::application::ApplicationHandler<tray_icon::menu::MenuEvent> for Application {
+                        fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+                        fn window_event(
+                            &mut self,
+                            _event_loop: &winit::event_loop::ActiveEventLoop,
+                            _window_id: winit::window::WindowId,
+                            _event: winit::event::WindowEvent
+                        ) {}
+
+                        fn new_events(
+                            &mut self,
+                            _event_loop: &winit::event_loop::ActiveEventLoop,
+                            cause: winit::event::StartCause,
+                        ) {
+                            // We create the icon once the event loop is actually running
+                            // to prevent issues like https://github.com/tauri-apps/tray-icon/issues/90
+                            if cause == winit::event::StartCause::Init {
+                                let _ = self.new_tray_menu().inspect_err(print_error);
+                            }
+                        }
+
+                        fn user_event(
+                            &mut self,
+                            event_loop: &winit::event_loop::ActiveEventLoop,
+                            event: tray_icon::menu::MenuEvent
+                        ) {
+                            println!("{event:?}");
+                            event_loop.exit();
+                        }
+                    }
 
                     use winit::event_loop::EventLoop;
-                    use winit::platform::run_on_demand::EventLoopExtRunOnDemand;
                     use winit::platform::windows::EventLoopBuilderExtWindows;
 
-                    EventLoop::builder()
+                    let event_loop = EventLoop::<tray_icon::menu::MenuEvent>::with_user_event()
                         .with_any_thread(true)
-                        .build()?
-                        .run_on_demand(|_, elwt| {
-                            // if let Ok(event) = tray_channel.try_recv() {
-                            //     println!("{event:?}");
-                            // }
-                            if menu_channel.try_recv().is_ok() {
-                                elwt.exit();
-                            }
-                        })?;
+                        .build()?;
+
+                    event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
+
+                    let proxy = event_loop.create_proxy();
+                    tray_icon::menu::MenuEvent::set_event_handler(Some(move |event| {
+                        let _ = proxy.send_event(event);
+                    }));
+
+                    event_loop.run_app(&mut Application::default())?;
 
                     Ok(())
                 })()
