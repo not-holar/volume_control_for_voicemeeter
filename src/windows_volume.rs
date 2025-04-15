@@ -4,15 +4,14 @@ use std::sync::Arc;
 use windows::Win32::{
     Devices::FunctionDiscovery::PKEY_Device_DeviceDesc,
     Media::Audio::{
-        eRender,
+        AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE_ACTIVE,
         Endpoints::{
             IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
         },
-        IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA,
-        DEVICE_STATE_ACTIVE,
+        IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, eRender,
     },
     System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, STGM_READ,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
     },
 };
 

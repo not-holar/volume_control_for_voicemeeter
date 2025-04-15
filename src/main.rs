@@ -95,7 +95,6 @@ async fn listen() -> anyhow::Result<()> {
 
                             Ok(())
                         }
-
                     }
 
                     impl winit::application::ApplicationHandler<tray_icon::menu::MenuEvent> for Application {
