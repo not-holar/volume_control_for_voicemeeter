@@ -23,6 +23,11 @@ fn handle_the_error(err: impl std::fmt::Display) {
 }
 
 fn main() {
+    let _ = unsafe {
+        use windows::Win32::System::Console::*;
+        AttachConsole(ATTACH_PARENT_PROCESS)
+    };
+
     println!("Started");
 
     smol::block_on(listen()).unwrap_or_else(handle_the_error);
