@@ -18,7 +18,9 @@ tokio = { version = "1.44.2", features = ["sync"] }
 tokio-graceful = "0.2.2"
 tray-icon = "0.20.0"
 voicemeeter = "0.3.0"
+win-msgbox = "0.2.1"
 winit = "0.30.9"
+
 
 [dependencies.windows]
 version = "0.54.0"

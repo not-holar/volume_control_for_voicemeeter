@@ -11,15 +11,21 @@ use lerp::Lerp;
 use smol::future::FutureExt;
 use tokio::sync::Notify;
 
-fn print_error(err: impl std::fmt::Display) {
-    println!("{err}");
+macro_rules! package_name {
+    () => {
+        concat!(env!("CARGO_PKG_NAME"), " v", env!("CARGO_PKG_VERSION"))
+    };
 }
 
-fn handle_the_error(err: impl std::fmt::Display) {
-    print_error(err);
+fn print_error(err: &impl std::fmt::Display) {
+    println!("{err}");
 
-    // println!("\nPress ENTER to continue...");
-    // std::io::stdin().lines().next();
+    let _ = win_msgbox::error::<win_msgbox::Okay>(format!("{err}").as_str())
+        .title(concat!(package_name!(), " Error"))
+        .show()
+        .map_err(anyhow::Error::msg)
+        .context("Failed to display win_msgbox error popup")
+        .inspect_err(|err| println!("{err}"));
 }
 
 fn main() {
@@ -30,7 +36,12 @@ fn main() {
 
     println!("Started");
 
-    smol::block_on(listen()).unwrap_or_else(handle_the_error);
+    let _ = smol::block_on(listen()).inspect_err(|err| {
+        print_error(err);
+
+        // println!("\nPress ENTER to continue...");
+        // std::io::stdin().lines().next(););
+    });
 
     println!("Exiting safely");
 }
@@ -42,7 +53,7 @@ async fn listen() -> anyhow::Result<()> {
     println!("COM initialized");
 
     windows_eco_mode::set_eco_mode_for_current_process()
-        .unwrap_or_else(|err| println!("Failed to set Process mode to Eco: {}", err));
+        .unwrap_or_else(|err| println!("info: Failed to set Process mode to Eco: {}", err));
 
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter input")?;
     let mut windows_volume_stream = observer.subscribe();
@@ -57,7 +68,7 @@ async fn listen() -> anyhow::Result<()> {
         std::thread::Builder::new()
             .name("Tray icon event loop".into())
             .spawn(move || {
-                (|| -> anyhow::Result<()> {
+                let _ = (|| -> anyhow::Result<()> {
                     let tray_menu = tray_icon::menu::Menu::new();
                     tray_menu
                         .append(&tray_icon::menu::MenuItem::new("Exit", true, None))
@@ -65,17 +76,13 @@ async fn listen() -> anyhow::Result<()> {
 
                     let _tray_icon = tray_icon::TrayIconBuilder::new()
                         .with_menu(Box::new(tray_menu))
-                        .with_tooltip(format!(
-                            "{}  v{}",
-                            env!("CARGO_PKG_NAME"),
-                            env!("CARGO_PKG_VERSION")
-                        ))
+                        .with_tooltip(package_name!())
                         .with_icon(
                             tray_icon::Icon::from_resource(1, None)
-                                .context("Failed to make icon")?,
+                                .context("Failed to read icon resource")?,
                         )
                         .build()
-                        .unwrap();
+                        .context("Failed to build tray icon")?;
 
                     // let tray_channel = tray_icon::TrayIconEvent::receiver();
                     let menu_channel = tray_icon::menu::MenuEvent::receiver();
@@ -98,13 +105,13 @@ async fn listen() -> anyhow::Result<()> {
 
                     Ok(())
                 })()
-                .unwrap_or_else(print_error);
+                .inspect_err(print_error);
 
                 exit_signal.notify_one();
             })?;
     }
 
-    (async {
+    let _ = (async {
         tokio_graceful::default_signal().await;
         anyhow::Ok(())
     })
@@ -158,15 +165,15 @@ async fn listen() -> anyhow::Result<()> {
 
             let gain = (-60.0).lerp(0.0, volume_slider_position);
 
-            vm_gain_parameter
+            let _ = vm_gain_parameter
                 .set(gain)
                 .await
                 .context("Couldn't set slider value")
-                .unwrap_or_else(print_error)
+                .inspect_err(print_error);
         }
     })
     .await
-    .unwrap_or_else(print_error);
+    .inspect_err(print_error);
 
     Ok(())
 }

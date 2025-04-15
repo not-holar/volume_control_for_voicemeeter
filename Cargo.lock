@@ -2667,6 +2667,7 @@ dependencies = [
  "tokio-graceful",
  "tray-icon",
  "voicemeeter",
+ "win-msgbox",
  "windows 0.54.0",
  "winit",
  "winres",
@@ -2892,6 +2893,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "win-msgbox"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b293d082c6da3f8e9f58a9d2fb076a61737b8f752fb559550a0a864ccfa2bd8"
+dependencies = [
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
