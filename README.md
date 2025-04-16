@@ -18,7 +18,7 @@ Written in Rust  🦀
 
 * Instead of constantly polling the volume slider for changes, this app uses the built-in Windows' `IAudioEndpointVolumeCallback` interface, thanks to which, the program is **completely idle** and not using **any** CPU resources when the volume isn't being changed.
 * Tracks the volume changes of specifically the `VoiceMeeter Input` audio device instead of the typical approach of tracking whatever the default windows audio device is, meaning that **VoiceMeeter's input volume will be properly synced even when it *isn't* set as default** (useful when outputting audio from different applications to different devices)
-* Tiny footprint (**0%** CPU, **.5mb** RAM).
+* Tiny footprint (**0%** CPU, **0.5mb** RAM).
 * The application properly unregisters with Voicemeeter's API when exiting, which prevents leaking resources and causing visual weirdness in the Voicemeeter's GUI.
 * Tray icon visually consistant with that of Voicemeeter.
 
