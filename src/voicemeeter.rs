@@ -34,15 +34,19 @@ impl Link {
     }
 
     pub fn is_currently_connected(&self) -> bool {
-        self.remote.is_parameters_dirty().is_ok()
+        self.remote.get_voicemeeter_type().is_ok() && self.remote.is_parameters_dirty().is_ok()
     }
 
     pub async fn wait_for_connection(&self) {
         if !self.is_currently_connected() {
+            use std::io::Write;
+            let mut stdout = std::io::stdout();
+
             print!(
-                "\nCouldn't connect to Voicemeeter. Will retry every 5s.\
+                "Couldn't connect to Voicemeeter. Will retry every 5s. \
                 Make sure it is running."
             );
+            let _ = stdout.flush();
 
             loop {
                 smol::Timer::after(std::time::Duration::from_secs(5)).await;
@@ -52,9 +56,16 @@ impl Link {
                 }
 
                 print!(".");
+                let _ = stdout.flush();
             }
 
-            println!("Connected.");
+            println!(
+                "\nConnected to {}.",
+                match self.remote.get_voicemeeter_type() {
+                    Ok(x) => format!("{x:?}"),
+                    Err(_) => "NOTHING? HOW DID THAT EVEN HAPPEN?".to_string(),
+                },
+            );
         }
     }
 }

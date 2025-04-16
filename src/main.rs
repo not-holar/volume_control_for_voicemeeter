@@ -174,9 +174,6 @@ async fn listen() -> anyhow::Result<()> {
                 .await
                 .context("windows_volume_stream error 🤨")?;
 
-            let volume_state = { windows_volume_stream.borrow().to_owned() };
-            let gain = (-60.0).lerp(0.0, volume_state.volume);
-
             link.wait_for_connection().await;
             // Update the remote's cached program type so that it can
             // correctly find the needed strip(s)
@@ -187,6 +184,9 @@ async fn listen() -> anyhow::Result<()> {
                 Virtual Input in any Voicemeeter edition \
                 but it's not there 🤷.",
             )?;
+
+            let volume_state = { windows_volume_stream.borrow_and_update().to_owned() };
+            let gain = (-60.0).lerp(0.0, volume_state.volume);
 
             vm_strip
                 .gain()

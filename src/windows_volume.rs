@@ -105,10 +105,11 @@ impl VolumeObserverInner {
             unsafe { device.Activate::<IAudioEndpointVolume>(CLSCTX_INPROC_SERVER, None) }
                 .context("Failed to activate device")?;
 
-        let (tx, rx) = tokio::sync::watch::channel(
+        let (tx, mut rx) = tokio::sync::watch::channel(
             VolumeState::try_from(&endpoint_volume)
                 .context("Couldn't get volume state from endpoint_volume")?,
         );
+        rx.mark_changed();
 
         // Don't drop this either!
         let callback = IAudioEndpointVolumeCallback::from(Callback { tx });
