@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod voicemeeter;
+mod volume_state_type;
 mod windows_eco_mode;
 mod windows_volume;
 
@@ -58,7 +59,7 @@ async fn listen() -> anyhow::Result<()> {
     let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter input")?;
     let mut windows_volume_stream = observer.subscribe();
 
-    let link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
+    let mut link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
 
     let exit_signal = Arc::new(Notify::new());
 
@@ -162,9 +163,6 @@ async fn listen() -> anyhow::Result<()> {
         anyhow::Ok(())
     })
     .or(async {
-        let mut previous_vm_edition = ::voicemeeter::types::VoicemeeterApplication::None;
-        let mut vm_gain_parameter = None;
-
         println!("Listening for volume changes");
 
         loop {
@@ -173,45 +171,31 @@ async fn listen() -> anyhow::Result<()> {
                 .await
                 .context("windows_volume_stream error 🤨")?;
 
-            // linear position of the volume slider from 0.0 to 1.0
-            let Some(volume_slider_position) = ({ *windows_volume_stream.borrow() }) else {
-                continue;
-            };
-
-            println!("Changed to {volume_slider_position}");
+            let volume_state = { windows_volume_stream.borrow().to_owned() };
+            let gain = (-60.0).lerp(0.0, volume_state.volume);
 
             link.wait_for_connection().await;
+            // Update the remote's cached program type so that it can
+            // correctly find the needed strip(s)
+            link.remote.update_program()?;
 
-            {
-                let mut remote = link.inner.remote.lock().await;
+            let vm_strip = link.virtual_inputs().next().context(
+                "There should absolutely be at least one \
+                Virtual Input in any Voicemeeter edition \
+                but it's not there 🤷.",
+            )?;
 
-                let vm_edition = {
-                    remote.update_program()?;
-                    remote.program
-                };
-
-                if vm_edition != previous_vm_edition {
-                    previous_vm_edition = vm_edition;
-                    vm_gain_parameter = Some({
-                        let strip = voicemeeter::Link::virtual_inputs(&remote).next().context(
-                            "There should absolutely be at least one \
-                            Virtual Input in any Voicemeeter edition \
-                            but it's not there 🤷.",
-                        )?;
-
-                        link.gain_parameter_of(&strip)
-                    });
-                }
-            };
-            let vm_gain_parameter = vm_gain_parameter.as_ref().unwrap();
-
-            let gain = (-60.0).lerp(0.0, volume_slider_position);
-
-            let _ = vm_gain_parameter
+            vm_strip
+                .gain()
                 .set(gain)
-                .await
-                .context("Couldn't set slider value")
-                .inspect_err(print_error);
+                .context("Couldn't set Voicemeeter strip gain")?;
+
+            vm_strip
+                .mute()
+                .set(volume_state.is_muted)
+                .context("Couldn't set Voicemeeter strip mute")?;
+
+            println!("Changed to {volume_state:?} -> {gain:.1}db");
         }
     })
     .await

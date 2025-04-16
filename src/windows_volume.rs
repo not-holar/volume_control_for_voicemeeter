@@ -1,3 +1,5 @@
+use crate::volume_state_type::VolumeState;
+
 use anyhow::Context;
 use std::sync::Arc;
 
@@ -36,7 +38,7 @@ impl VolumeObserver {
         })
     }
 
-    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Option<f32>> {
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<VolumeState> {
         self.inner.rx.clone()
     }
 
@@ -92,7 +94,7 @@ impl VolumeObserver {
 
 #[derive(Debug)]
 struct VolumeObserverInner {
-    pub rx: tokio::sync::watch::Receiver<Option<f32>>,
+    pub rx: tokio::sync::watch::Receiver<VolumeState>,
     _keepalive: (IAudioEndpointVolumeCallback, IAudioEndpointVolume),
 }
 
@@ -104,7 +106,8 @@ impl VolumeObserverInner {
                 .context("Failed to activate device")?;
 
         let (tx, rx) = tokio::sync::watch::channel(
-            unsafe { endpoint_volume.GetMasterVolumeLevelScalar() }.ok(),
+            VolumeState::try_from(&endpoint_volume)
+                .context("Couldn't get volume state from endpoint_volume")?,
         );
 
         // Don't drop this either!
@@ -123,23 +126,22 @@ impl VolumeObserverInner {
 #[derive(Debug)]
 #[windows::core::implement(IAudioEndpointVolumeCallback)]
 struct Callback {
-    pub tx: tokio::sync::watch::Sender<Option<f32>>,
+    pub tx: tokio::sync::watch::Sender<VolumeState>,
 }
 
 #[allow(non_snake_case)]
 impl IAudioEndpointVolumeCallback_Impl for Callback_Impl {
     fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
         self.tx.send_if_modified(|x| {
-            let volume = unsafe { &*data }.fMasterVolume;
+            let state = VolumeState::from(unsafe { &*data });
 
-            if Some(volume) != *x {
-                x.replace(volume);
+            if *x != state {
+                *x = state;
                 true
             } else {
                 false
             }
         });
-        // .expect("IAudioEndpointVolumeCallback_Impl send error");
         Ok(())
     }
 }
