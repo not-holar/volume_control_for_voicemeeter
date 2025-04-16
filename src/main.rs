@@ -18,15 +18,18 @@ macro_rules! package_name {
     };
 }
 
-fn print_error(err: &impl std::fmt::Display) {
-    println!("{err}");
+fn print_error(err: &impl std::fmt::Debug) {
+    fn format_error(err: &impl std::fmt::Debug) -> String {
+        format!("{err:?}")
+    }
+    println!("{}", format_error(err));
 
-    let _ = win_msgbox::error::<win_msgbox::Okay>(format!("{err}").as_str())
+    let _ = win_msgbox::error::<win_msgbox::Okay>(format_error(err).as_str())
         .title(concat!(package_name!(), " Error"))
         .show()
         .map_err(anyhow::Error::msg)
         .context("Failed to display win_msgbox error popup")
-        .inspect_err(|err| println!("{err}"));
+        .inspect_err(|err| println!("{}", format_error(err)));
 }
 
 fn main() {
