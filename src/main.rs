@@ -186,7 +186,7 @@ async fn listen() -> anyhow::Result<()> {
             )?;
 
             let volume_state = { windows_volume_stream.borrow_and_update().to_owned() };
-            let gain = (-60.0).lerp(0.0, volume_state.volume);
+            let gain = (-60.0).lerp(12.0, volume_state.volume);
 
             vm_strip
                 .gain()
