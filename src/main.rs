@@ -1,208 +1,232 @@
 #![windows_subsystem = "windows"]
 
+mod config;
+mod gain;
+mod logging;
+mod tray;
 mod voicemeeter;
 mod volume_state_type;
 mod windows_eco_mode;
 mod windows_volume;
 
-use std::sync::Arc;
+use std::{sync::OnceLock, time::Duration};
 
 use anyhow::Context;
-use lerp::Lerp;
-use smol::future::FutureExt;
-use tokio::sync::Notify;
+use smol::{
+    channel::{self, Receiver, Sender},
+    future::FutureExt,
+};
+use volume_state_type::VolumeState;
+use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, SetConsoleCtrlHandler};
+use windows_core::BOOL;
 
-macro_rules! package_name {
-    () => {
-        concat!(env!("CARGO_PKG_NAME"), " v", env!("CARGO_PKG_VERSION"))
-    };
+pub const PACKAGE_NAME: &str = concat!(env!("CARGO_PKG_NAME"), " v", env!("CARGO_PKG_VERSION"));
+
+/// Lowercase part of the name of the Windows playback device that feeds Voicemeeter's first virtual input.
+const DEVICE_NAME: &str = "voicemeeter input";
+
+/// How often to check that the device and Voicemeeter are still there, in case a notification was missed.
+const RECHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Device changes come in bursts (removed, added, state changed); let them settle before looking again.
+const DEVICE_SETTLE_DELAY: Duration = Duration::from_millis(300);
+
+pub enum AppEvent {
+    Exit,
+    SetMaxGain(f32),
 }
 
-fn print_error(err: &impl std::fmt::Debug) {
-    fn format_error(err: &impl std::fmt::Debug) -> String {
-        format!("{err:?}")
-    }
-    println!("{}", format_error(err));
+pub fn show_error(err: &anyhow::Error) {
+    log!("Error: {err:?}");
 
-    let _ = win_msgbox::error::<win_msgbox::Okay>(format_error(err).as_str())
-        .title(concat!(package_name!(), " Error"))
-        .show()
-        .map_err(anyhow::Error::msg)
-        .context("Failed to display win_msgbox error popup")
-        .inspect_err(|err| println!("{}", format_error(err)));
+    let _ = win_msgbox::error::<win_msgbox::Okay>(&format!("{err:?}"))
+        .title(concat!(env!("CARGO_PKG_NAME"), " v", env!("CARGO_PKG_VERSION"), " Error"))
+        .show();
 }
 
 fn main() {
-    let _ = unsafe {
-        use windows::Win32::System::Console::*;
-        AttachConsole(ATTACH_PARENT_PROCESS)
-    };
+    let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 
-    println!("Started");
+    logging::init();
+    log!("{PACKAGE_NAME} started, log file: {}", logging::log_path().display());
 
-    let _ = smol::block_on(listen()).inspect_err(|err| {
-        print_error(err);
-
-        // println!("\nPress ENTER to continue...");
-        // std::io::stdin().lines().next(););
-    });
-
-    println!("Exiting safely");
-}
-
-async fn listen() -> anyhow::Result<()> {
-    // Initialize Win32's COM libray. Things break without this step.
-    windows_volume::initialize_com().context("COM initialization failed")?;
-
-    println!("COM initialized");
-
-    windows_eco_mode::set_eco_mode_for_current_process()
-        .unwrap_or_else(|err| println!("info: Failed to set Process mode to Eco: {}", err));
-
-    let observer = windows_volume::VolumeObserver::from_device_name("voicemeeter input")?;
-    let mut windows_volume_stream = observer.subscribe();
-
-    let mut link = voicemeeter::Link::new().context("Failed to register with Voicemeeter")?;
-
-    let exit_signal = Arc::new(Notify::new());
-
-    {
-        let exit_signal = exit_signal.to_owned();
-
-        std::thread::Builder::new()
-            .name("Tray icon event loop".into())
-            .spawn(move || {
-                let _ = (|| -> anyhow::Result<()> {
-                    #[derive(Default)]
-                    struct Application {
-                        tray_icon: Option<tray_icon::TrayIcon>,
-                    }
-
-                    impl Application {
-                        fn new_tray_menu(&mut self) -> anyhow::Result<()> {
-                            let tray_menu = tray_icon::menu::Menu::new();
-                            tray_menu
-                                .append(&tray_icon::menu::MenuItem::new("Exit", true, None))
-                                .context("Couldn't add item to the tray menu")?;
-
-                            let tray_icon = tray_icon::TrayIconBuilder::new()
-                                .with_menu(Box::new(tray_menu))
-                                .with_tooltip(package_name!())
-                                .with_icon(
-                                    tray_icon::Icon::from_resource(1, None)
-                                        .context("Failed to read icon resource")?,
-                                )
-                                .build()
-                                .context("Failed to build tray icon")?;
-
-                            self.tray_icon = Some(tray_icon);
-
-                            Ok(())
-                        }
-                    }
-
-                    impl winit::application::ApplicationHandler<tray_icon::menu::MenuEvent> for Application {
-                        fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
-
-                        fn window_event(
-                            &mut self,
-                            _event_loop: &winit::event_loop::ActiveEventLoop,
-                            _window_id: winit::window::WindowId,
-                            _event: winit::event::WindowEvent
-                        ) {}
-
-                        fn new_events(
-                            &mut self,
-                            _event_loop: &winit::event_loop::ActiveEventLoop,
-                            cause: winit::event::StartCause,
-                        ) {
-                            // We create the icon once the event loop is actually running
-                            // to prevent issues like https://github.com/tauri-apps/tray-icon/issues/90
-                            if cause == winit::event::StartCause::Init {
-                                let _ = self.new_tray_menu().inspect_err(print_error);
-                            }
-                        }
-
-                        fn user_event(
-                            &mut self,
-                            event_loop: &winit::event_loop::ActiveEventLoop,
-                            event: tray_icon::menu::MenuEvent
-                        ) {
-                            println!("{event:?}");
-                            event_loop.exit();
-                        }
-                    }
-
-                    use winit::event_loop::EventLoop;
-                    use winit::platform::windows::EventLoopBuilderExtWindows;
-
-                    let event_loop = EventLoop::<tray_icon::menu::MenuEvent>::with_user_event()
-                        .with_any_thread(true)
-                        .build()?;
-
-                    event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-
-                    let proxy = event_loop.create_proxy();
-                    tray_icon::menu::MenuEvent::set_event_handler(Some(move |event| {
-                        let _ = proxy.send_event(event);
-                    }));
-
-                    event_loop.run_app(&mut Application::default())?;
-
-                    Ok(())
-                })()
-                .inspect_err(print_error);
-
-                exit_signal.notify_one();
-            })?;
+    if let Err(err) = smol::block_on(run()) {
+        show_error(&err);
     }
 
-    let _ = (async {
-        tokio_graceful::default_signal().await;
-        anyhow::Ok(())
-    })
-    .or(async {
-        exit_signal.notified().await;
-        anyhow::Ok(())
-    })
-    .or(async {
-        println!("Listening for volume changes");
+    log!("Exiting");
+}
 
-        loop {
-            windows_volume_stream
-                .changed()
-                .await
-                .context("windows_volume_stream error 🤨")?;
+async fn run() -> anyhow::Result<()> {
+    windows_volume::initialize_com().context("COM initialization failed")?;
 
-            link.wait_for_connection().await;
-            // Update the remote's cached program type so that it can
-            // correctly find the needed strip(s)
-            link.remote.update_program()?;
+    if let Err(err) = windows_eco_mode::set_eco_mode_for_current_process() {
+        log!("info: Failed to set Process mode to Eco: {err}");
+    }
 
-            let vm_strip = link.virtual_inputs().next().context(
-                "There should absolutely be at least one \
-                Virtual Input in any Voicemeeter edition \
-                but it's not there 🤷.",
-            )?;
+    // Only fails when the Remote API itself is unavailable, i.e. Voicemeeter isn't installed.
+    // Voicemeeter not running (yet) is fine and handled by the sync loop.
+    let mut link = voicemeeter::Link::new()
+        .context("Couldn't load the Voicemeeter Remote API. Is Voicemeeter installed?")?;
 
-            let volume_state = { windows_volume_stream.borrow_and_update().to_owned() };
-            let gain = (-60.0).lerp(0.0, volume_state.volume);
+    let (events_tx, events_rx) = channel::unbounded();
+    install_ctrl_handler(events_tx.clone());
 
-            vm_strip
-                .gain()
-                .set(gain)
-                .context("Couldn't set Voicemeeter strip gain")?;
+    let max_gain_db = config::load_max_gain();
+    let tray = tray::spawn(events_tx, max_gain_db)?;
 
-            vm_strip
-                .mute()
-                .set(volume_state.is_muted)
-                .context("Couldn't set Voicemeeter strip mute")?;
+    let result = sync_loop(&mut link, events_rx, max_gain_db).await;
 
-            println!("Changed to {volume_state:?} -> {gain:.1}db");
+    tray.close();
+    result
+}
+
+/// Keeps Voicemeeter in sync with the Windows volume until asked to exit.
+///
+/// Nothing in here is fatal: a missing device or a missing/restarting Voicemeeter
+/// just means waiting until they come back.
+async fn sync_loop(
+    link: &mut voicemeeter::Link,
+    events: Receiver<AppEvent>,
+    mut max_gain_db: f32,
+) -> anyhow::Result<()> {
+    let (volume_tx, volume_rx) = channel::bounded::<()>(1);
+    let (devices_tx, devices_rx) = channel::bounded::<()>(1);
+
+    let devices = windows_volume::DeviceWatcher::new(devices_tx)?;
+
+    let mut observer: Option<windows_volume::VolumeObserver> = None;
+    let mut rescan = true;
+    let mut waiting_for_device_logged = false;
+    let mut vm_connected: Option<bool> = None;
+    let mut last_synced: Option<(VolumeState, f32)> = None;
+    let mut last_error = String::new();
+
+    log!("Max volume: {}", config::max_gain_label(max_gain_db));
+
+    loop {
+        if rescan || observer.is_none() {
+            rescan = false;
+            // Drop (and unregister) the old observer before creating a new one
+            observer = None;
+
+            match devices.observe(DEVICE_NAME, volume_tx.clone()) {
+                Ok(Some(found)) => {
+                    log!("Listening for volume changes of \"{}\"", found.name());
+                    observer = Some(found);
+                    waiting_for_device_logged = false;
+                }
+                Ok(None) if !waiting_for_device_logged => {
+                    log!("Waiting for the \"VoiceMeeter Input\" playback device to become active...");
+                    waiting_for_device_logged = true;
+                }
+                Ok(None) => {}
+                Err(err) => log_once(&mut last_error, format!("{err:#}")),
+            }
         }
-    })
-    .await
-    .inspect_err(print_error);
 
-    Ok(())
+        if let Some(current) = &observer {
+            match current.state() {
+                Err(err) => {
+                    log!("Lost the audio device ({err}), looking for it again");
+                    observer = None;
+                }
+                Ok(state) => {
+                    let connected = link.is_connected();
+                    if vm_connected != Some(connected) {
+                        vm_connected = Some(connected);
+                        if connected {
+                            log!("Connected to {}", link.program_name());
+                            // Voicemeeter (re)started: push the current volume again
+                            last_synced = None;
+                        } else {
+                            log!("Voicemeeter is not running, waiting for it...");
+                        }
+                    }
+
+                    let gain_db = gain::volume_to_gain(state.volume, max_gain_db);
+
+                    if connected && last_synced != Some((state, gain_db)) {
+                        match link.apply(state, gain_db) {
+                            Ok(()) => {
+                                log!(
+                                    "{:.0}%{} -> {gain_db:+.1} dB",
+                                    state.volume * 100.0,
+                                    if state.is_muted { " (muted)" } else { "" }
+                                );
+                                last_synced = Some((state, gain_db));
+                                last_error.clear();
+                            }
+                            Err(err) => log_once(
+                                &mut last_error,
+                                format!("Couldn't update Voicemeeter, will retry: {err:#}"),
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+
+        enum Wake {
+            Volume,
+            Devices,
+            Event(AppEvent),
+            Tick,
+        }
+
+        let wake = async {
+            let _ = volume_rx.recv().await;
+            Wake::Volume
+        }
+        .or(async {
+            let _ = devices_rx.recv().await;
+            Wake::Devices
+        })
+        .or(async { Wake::Event(events.recv().await.unwrap_or(AppEvent::Exit)) })
+        .or(async {
+            smol::Timer::after(RECHECK_INTERVAL).await;
+            Wake::Tick
+        })
+        .await;
+
+        match wake {
+            Wake::Volume | Wake::Tick => {}
+            Wake::Devices => {
+                smol::Timer::after(DEVICE_SETTLE_DELAY).await;
+                let _ = devices_rx.try_recv();
+                rescan = true;
+            }
+            Wake::Event(AppEvent::Exit) => return Ok(()),
+            Wake::Event(AppEvent::SetMaxGain(db)) => {
+                max_gain_db = db;
+                log!("Max volume: {}", config::max_gain_label(db));
+                if let Err(err) = config::save_max_gain(db) {
+                    log!("Couldn't save the max volume setting: {err}");
+                }
+            }
+        }
+    }
+}
+
+/// Log `message` unless it is the same as the previous one, to avoid flooding the log while retrying.
+fn log_once(last: &mut String, message: String) {
+    if *last != message {
+        log!("{message}");
+        *last = message;
+    }
+}
+
+/// Exit cleanly (logging out of Voicemeeter, removing the tray icon) on Ctrl+C when run from a terminal.
+fn install_ctrl_handler(events: Sender<AppEvent>) {
+    static EVENTS: OnceLock<Sender<AppEvent>> = OnceLock::new();
+
+    unsafe extern "system" fn handler(_ctrl_type: u32) -> BOOL {
+        if let Some(events) = EVENTS.get() {
+            let _ = events.try_send(AppEvent::Exit);
+        }
+        BOOL(1)
+    }
+
+    let _ = EVENTS.set(events);
+    let _ = unsafe { SetConsoleCtrlHandler(Some(handler), true) };
 }
