@@ -1,71 +1,65 @@
+use crate::volume_state_type::VolumeState;
+
+use ::voicemeeter::interface::parameters::Strip;
+use anyhow::Context;
+
+/// The link between the app and Voicemeeter.
+///
+/// Logging in to the Remote API works whether or not Voicemeeter is running;
+/// the API starts answering as soon as Voicemeeter (re)starts.
 #[derive(Debug)]
 pub struct Link {
-    pub remote: ::voicemeeter::VoicemeeterRemote,
+    remote: ::voicemeeter::VoicemeeterRemote,
 }
 
-/// The link between the app and Voicemeeter, at least one copy of the first one you call must remain alive otherwise things break!
 impl Link {
-    pub fn new() -> Result<Self, LinkCreationError> {
-        ::voicemeeter::VoicemeeterRemote::new()
-            .map_err(LinkCreationError::RemoteInit)
-            .map(|remote| Self { remote })
+    pub fn new() -> Result<Self, ::voicemeeter::interface::InitializationError> {
+        ::voicemeeter::VoicemeeterRemote::new().map(|remote| Self { remote })
     }
-}
 
-/// Error that can arise when creating [`VoicemeeterLink`].
-#[derive(Debug, thiserror::Error)]
-pub enum LinkCreationError {
-    #[error("{0}")]
-    RemoteInit(#[from] ::voicemeeter::interface::InitializationError),
-}
-
-impl Link {
-    pub fn strips(&self) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
+    fn virtual_inputs(&self) -> impl Iterator<Item = Strip<'_>> {
         let parameters = self.remote.parameters();
 
-        (0..).map_while(move |index| parameters.strip(index).ok())
+        (0..)
+            .map_while(move |index| parameters.strip(index).ok())
+            .filter(Strip::is_virtual)
     }
 
-    pub fn virtual_inputs(
-        &self,
-    ) -> impl Iterator<Item = ::voicemeeter::interface::parameters::Strip> {
-        self.strips() // take all existing strips
-            .filter(::voicemeeter::interface::parameters::Strip::is_virtual) // leave only virtual ones
-    }
-
-    pub fn is_currently_connected(&self) -> bool {
+    pub fn is_connected(&self) -> bool {
         self.remote.get_voicemeeter_type().is_ok() && self.remote.is_parameters_dirty().is_ok()
     }
 
-    pub async fn wait_for_connection(&self) {
-        if !self.is_currently_connected() {
-            use std::io::Write;
-            let mut stdout = std::io::stdout();
-
-            print!(
-                "Couldn't connect to Voicemeeter. Will retry every 5s. \
-                Make sure it is running."
-            );
-            let _ = stdout.flush();
-
-            loop {
-                smol::Timer::after(std::time::Duration::from_secs(5)).await;
-
-                if self.is_currently_connected() {
-                    break;
-                }
-
-                print!(".");
-                let _ = stdout.flush();
-            }
-
-            println!(
-                "\nConnected to {}.",
-                match self.remote.get_voicemeeter_type() {
-                    Ok(x) => format!("{x:?}"),
-                    Err(_) => "NOTHING? HOW DID THAT EVEN HAPPEN?".to_string(),
-                },
-            );
+    pub fn program_name(&self) -> String {
+        match self.remote.get_voicemeeter_type() {
+            Ok(program) => format!("{program:?}"),
+            Err(_) => "Voicemeeter".to_string(),
         }
+    }
+
+    /// Apply the volume state to the first virtual input strip (the one fed by
+    /// the "VoiceMeeter Input" device).
+    pub fn apply(&mut self, state: VolumeState, gain_db: f32) -> anyhow::Result<()> {
+        // Refresh the cached program type so that the right strips are found,
+        // the user may have switched between Voicemeeter editions.
+        self.remote
+            .update_program()
+            .context("Couldn't read the Voicemeeter edition")?;
+
+        let strip = self
+            .virtual_inputs()
+            .next()
+            .context("Couldn't find a virtual input strip in Voicemeeter")?;
+
+        strip
+            .gain()
+            .set(gain_db)
+            .context("Couldn't set Voicemeeter strip gain")?;
+
+        strip
+            .mute()
+            .set(state.is_muted)
+            .context("Couldn't set Voicemeeter strip mute")?;
+
+        Ok(())
     }
 }
